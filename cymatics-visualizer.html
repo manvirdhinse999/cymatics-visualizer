@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>3D Cymatics Visualizer</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: black; }
+    #uploadBtn { position: absolute; z-index: 10; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); border: 1px solid white; padding: 6px; cursor: pointer; }
+    #controlsContainer {
+      position: absolute; z-index: 10; top: 50px; left: 10px; color: white;
+      font-family: Arial, sans-serif; background: rgba(0, 0, 0, 0.7); padding: 10px; border-radius: 5px;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+      display: flex; flex-direction: column; width: 250px; min-width: 150px;
+    }
+    .freq-control { margin-bottom: 10px; }
+    .button { color: white; background: rgba(0, 0, 0, 0.5); border: 1px solid white; padding: 6px; cursor: pointer; }
+    .close-button { position: absolute; top: 5px; right: 5px; background: rgba(255, 0, 0, 0.7); border: none; padding: 4px; cursor: pointer; }
+    @media (max-width: 768px) {
+      #controlsContainer { width: 80%; }
+    }
+  </style>
+</head>
+<body>
+  <input type="file" id="uploadBtn" accept="audio/*">
+  <div id="controlsContainer">
+    <button class="button" id="addFreqBtn">Add Frequency</button>
+    <button class="button" id="removeFreqBtn">Remove Frequency</button>
+    <div id="frequencyControls"></div>
+    <button class="button" id="closeControlsBtn">Close Controls</button>
+  </div>
+  <canvas id="c"></canvas>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
+  <script>
+    let scene = new THREE.Scene();
+    let camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.z = 10;
+
+    let renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    let geometry = new THREE.PlaneGeometry(10, 10, 256, 256);
+    geometry.dynamic = true;
+    let material = new THREE.ShaderMaterial({
+      vertexShader: `
+        uniform float time;
+        attribute float displacement;
+        void main() {
+          vec3 newPosition = position;
+          newPosition.z += displacement * sin(time + position.x * 0.5 + position.y * 0.5);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
+        }
+      `,
+      fragmentShader: `
+        void main() {
+          gl_FragColor = vec4(0.0, 1.0, 1.0, 1.0);
+        }
+      `,
+      wireframe: true,
+    });
+
+    let mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+
+    let analyser, dataArray;
+
+    function setupAudio(audio) {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = ctx.createMediaElementSource(audio);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyser.connect(ctx.destination);
+      dataArray = new Uint8Array(analyser.frequencyBinCount);
+    }
+
+    document.getElementById('uploadBtn').addEventListener('change', function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const audio = new Audio();
+      audio.crossOrigin = "anonymous";
+      audio.src = URL.createObjectURL(file);
+      audio.load();
+
+      audio.addEventListener("canplay", () => {
+        setupAudio(audio);
+        audio.play().catch(err => {
+          alert("Playback blocked. Click the screen first.");
+          console.error(err);
+        });
+      });
+    });
+
+    // Frequency Control Variables
+    let frequencyControls = [];
+    
+    // Function to add a new frequency slider
+    function addFrequencyControl() {
+      const freqContainer = document.createElement('div');
+      freqContainer.classList.add('freq-control');
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = 20;
+      slider.max = 1000;
+      slider.step = 1;
+      slider.value = 100;
+      
+      const label = document.createElement('label');
+      label.textContent = `Frequency: `;
+      label.appendChild(slider);
+      
+      freqContainer.appendChild(label);
+      document.getElementById('frequencyControls').appendChild(freqContainer);
+
+      frequencyControls.push(slider);
+    }
+
+    // Add initial frequency control
+    addFrequencyControl();
+
+    // Remove last frequency control
+    document.getElementById('removeFreqBtn').addEventListener('click', function() {
+      if (frequencyControls.length > 0) {
+        const lastControl = frequencyControls.pop();
+        lastControl.parentElement.remove();
+      }
+    });
+
+    // Add new frequency control on button click
+    document.getElementById('addFreqBtn').addEventListener('click', addFrequencyControl);
+
+    // Toggle controls window
+    document.getElementById('closeControlsBtn').addEventListener('click', function() {
+      const controls = document.getElementById('controlsContainer');
+      controls.style.display = controls.style.display === 'none' ? 'flex' : 'none';
+    });
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (analyser && dataArray) {
+        analyser.getByteFrequencyData(dataArray);
+
+        let totalFrequency = 0;
+        frequencyControls.forEach(slider => {
+          let freq = slider.value;
+          let freqData = dataArray[Math.floor(freq / 10)] / 255;
+          totalFrequency += freqData;
+        });
+
+        // Adjust the mesh vertices based on the sum of selected frequencies
+        for (let i = 0; i < geometry.attributes.position.count; i++) {
+          const x = geometry.attributes.position.getX(i);
+          const y = geometry.attributes.position.getY(i);
+          const z = Math.sin(x * 3 + y * 3 + Date.now() * 0.005) * totalFrequency * 0.5;
+          geometry.attributes.position.setZ(i, z);
+        }
+        geometry.attributes.position.needsUpdate = true;
+      }
+
+      mesh.rotation.z += 0.002;
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
