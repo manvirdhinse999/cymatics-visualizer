@@ -1,1 +1,1 @@
-# cymatics-visualizer
+# Water Cymatics Visualizer
