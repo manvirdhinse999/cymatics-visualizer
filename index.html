@@ -92,26 +92,27 @@
     vec2 uv = gl_FragCoord.xy / u_resolution;
     uv = uv * 2.0 - 1.0;
 
+    // Apply radial distortion to the coordinates
     float r = length(uv);
     uv = uv * (1.0 + 0.1 * sin(u_time + r * 10.0));
 
     float intensity = 0.0;
 
+    // Loop over the frequencies to create interference patterns
     for (int i = 0; i < 10; i++) {
       float freq = u_harmonics[i];
       if (freq > 0.0) {
-        float phase = u_time * 0.5 + float(i);
-        intensity += sin(freq * uv.x + phase) * 0.5;
-        intensity += sin(freq * uv.y - phase) * 0.5;
+        intensity += sin(freq * uv.x + u_time) * 0.5;
+        intensity += sin(freq * uv.y + u_time) * 0.5;
       }
     }
 
+    // Color calculation based on intensity and frequency
     vec3 color = frequencyToColor(intensity * 1000.0);
     gl_FragColor = vec4(color, 1.0);
   }
 </script>
 
-<!-- ✅ JavaScript moved to the end -->
 <script>
   const canvas = document.getElementById('c');
   const gl = canvas.getContext('webgl');
@@ -183,13 +184,13 @@
     sourceNode.connect(analyser);
     analyser.connect(audioContext.destination);
 
-    analyser.fftSize = 2048;
+    analyser.fftSize = 2048;  // Optimal FFT size
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
 
     function updateFrequenciesFromAudio() {
       analyser.getByteFrequencyData(dataArray);
-      frequencies = Array.from(dataArray).slice(0, 10).map(f => f / 255 * 20000);
+      frequencies = Array.from(dataArray).slice(0, 10).map(f => f / 255 * 20000); // Rescale for mapping
       requestAnimationFrame(updateFrequenciesFromAudio);
     }
 
