@@ -1,170 +1,215 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>3D Cymatics Visualizer</title>
+  <meta charset="UTF-8" />
+  <title>Water Cymatics (Spectral Colors)</title>
   <style>
-    body { margin: 0; overflow: hidden; background: black; }
-    #uploadBtn { position: absolute; z-index: 10; top: 10px; left: 10px; color: white; background: rgba(0,0,0,0.5); border: 1px solid white; padding: 6px; cursor: pointer; }
-    #controlsContainer {
-      position: absolute; z-index: 10; top: 50px; left: 10px; color: white;
-      font-family: Arial, sans-serif; background: rgba(0, 0, 0, 0.7); padding: 10px; border-radius: 5px;
-      box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-      display: flex; flex-direction: column; width: 250px; min-width: 150px;
+    body {
+      margin: 0;
+      background: white;
+      overflow: hidden;
+      font-family: sans-serif;
+      color: #333;
     }
-    .freq-control { margin-bottom: 10px; }
-    .button { color: white; background: rgba(0, 0, 0, 0.5); border: 1px solid white; padding: 6px; cursor: pointer; }
-    .close-button { position: absolute; top: 5px; right: 5px; background: rgba(255, 0, 0, 0.7); border: none; padding: 4px; cursor: pointer; }
-    @media (max-width: 768px) {
-      #controlsContainer { width: 80%; }
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 12px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+    }
+    input {
+      margin-bottom: 5px;
+    }
+    audio {
+      display: none;
     }
   </style>
 </head>
 <body>
-  <input type="file" id="uploadBtn" accept="audio/*">
-  <div id="controlsContainer">
-    <button class="button" id="addFreqBtn">Add Frequency</button>
-    <button class="button" id="removeFreqBtn">Remove Frequency</button>
-    <div id="frequencyControls"></div>
-    <button class="button" id="closeControlsBtn">Close Controls</button>
-  </div>
-  <canvas id="c"></canvas>
+<canvas id="c"></canvas>
+<div id="controls">
+  <input type="file" id="audioFile" accept="audio/*" />
+  <button id="playButton">Play Audio</button>
+</div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
-  <script>
-    let scene = new THREE.Scene();
-    let camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-    camera.position.z = 10;
+<script type="x-shader/x-vertex" id="vertex-shader">
+  attribute vec4 a_position;
+  void main() {
+    gl_Position = a_position;
+  }
+</script>
 
-    let renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
+<script type="x-shader/x-fragment" id="fragment-shader">
+  precision mediump float;
+  uniform float u_time;
+  uniform vec2 u_resolution;
+  uniform float u_harmonics[10];
 
-    let geometry = new THREE.PlaneGeometry(10, 10, 256, 256);
-    geometry.dynamic = true;
-    let material = new THREE.ShaderMaterial({
-      vertexShader: `
-        uniform float time;
-        attribute float displacement;
-        void main() {
-          vec3 newPosition = position;
-          newPosition.z += displacement * sin(time + position.x * 0.5 + position.y * 0.5);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
-        }
-      `,
-      fragmentShader: `
-        void main() {
-          gl_FragColor = vec4(0.0, 1.0, 1.0, 1.0);
-        }
-      `,
-      wireframe: true,
-    });
+  vec3 wavelengthToRGB(float wavelength) {
+    float r = 0.0;
+    float g = 0.0;
+    float b = 0.0;
 
-    let mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
-
-    let analyser, dataArray;
-
-    function setupAudio(audio) {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const source = ctx.createMediaElementSource(audio);
-      analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyser.connect(ctx.destination);
-      dataArray = new Uint8Array(analyser.frequencyBinCount);
+    if (wavelength >= 380.0 && wavelength < 440.0) {
+      r = -(wavelength - 440.0) / (440.0 - 380.0);
+      b = 1.0;
+    } else if (wavelength >= 440.0 && wavelength < 490.0) {
+      g = (wavelength - 440.0) / (490.0 - 440.0);
+      b = 1.0;
+    } else if (wavelength >= 490.0 && wavelength < 510.0) {
+      g = 1.0;
+      b = -(wavelength - 510.0) / (510.0 - 490.0);
+    } else if (wavelength >= 510.0 && wavelength < 580.0) {
+      r = (wavelength - 510.0) / (580.0 - 510.0);
+      g = 1.0;
+    } else if (wavelength >= 580.0 && wavelength < 645.0) {
+      r = 1.0;
+      g = -(wavelength - 645.0) / (645.0 - 580.0);
+    } else if (wavelength >= 645.0 && wavelength <= 750.0) {
+      r = 1.0;
     }
 
-    document.getElementById('uploadBtn').addEventListener('change', function (e) {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      const audio = new Audio();
-      audio.crossOrigin = "anonymous";
-      audio.src = URL.createObjectURL(file);
-      audio.load();
-
-      audio.addEventListener("canplay", () => {
-        setupAudio(audio);
-        audio.play().catch(err => {
-          alert("Playback blocked. Click the screen first.");
-          console.error(err);
-        });
-      });
-    });
-
-    // Frequency Control Variables
-    let frequencyControls = [];
-    
-    // Function to add a new frequency slider
-    function addFrequencyControl() {
-      const freqContainer = document.createElement('div');
-      freqContainer.classList.add('freq-control');
-
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.min = 20;
-      slider.max = 1000;
-      slider.step = 1;
-      slider.value = 100;
-      
-      const label = document.createElement('label');
-      label.textContent = `Frequency: `;
-      label.appendChild(slider);
-      
-      freqContainer.appendChild(label);
-      document.getElementById('frequencyControls').appendChild(freqContainer);
-
-      frequencyControls.push(slider);
+    float factor = 1.0;
+    if (wavelength > 700.0) {
+      factor = 0.3 + 0.7 * (750.0 - wavelength) / (750.0 - 700.0);
+    } else if (wavelength < 420.0) {
+      factor = 0.3 + 0.7 * (wavelength - 380.0) / (420.0 - 380.0);
     }
 
-    // Add initial frequency control
-    addFrequencyControl();
+    return vec3(r, g, b) * factor;
+  }
 
-    // Remove last frequency control
-    document.getElementById('removeFreqBtn').addEventListener('click', function() {
-      if (frequencyControls.length > 0) {
-        const lastControl = frequencyControls.pop();
-        lastControl.parentElement.remove();
+  vec3 frequencyToColor(float frequency) {
+    float normFreq = clamp((frequency - 20.0) / (20000.0 - 20.0), 0.0, 1.0);
+    float wavelength = 750.0 - normFreq * (750.0 - 380.0);
+    return wavelengthToRGB(wavelength);
+  }
+
+  void main() {
+    vec2 uv = gl_FragCoord.xy / u_resolution;
+    uv = uv * 2.0 - 1.0;
+
+    // Apply radial distortion to the coordinates
+    float r = length(uv);
+    uv = uv * (1.0 + 0.1 * sin(u_time + r * 10.0));
+
+    float intensity = 0.0;
+
+    // Loop over the frequencies to create interference patterns
+    for (int i = 0; i < 10; i++) {
+      float freq = u_harmonics[i];
+      if (freq > 0.0) {
+        intensity += sin(freq * uv.x + u_time) * 0.5;
+        intensity += sin(freq * uv.y + u_time) * 0.5;
       }
-    });
-
-    // Add new frequency control on button click
-    document.getElementById('addFreqBtn').addEventListener('click', addFrequencyControl);
-
-    // Toggle controls window
-    document.getElementById('closeControlsBtn').addEventListener('click', function() {
-      const controls = document.getElementById('controlsContainer');
-      controls.style.display = controls.style.display === 'none' ? 'flex' : 'none';
-    });
-
-    function animate() {
-      requestAnimationFrame(animate);
-
-      if (analyser && dataArray) {
-        analyser.getByteFrequencyData(dataArray);
-
-        let totalFrequency = 0;
-        frequencyControls.forEach(slider => {
-          let freq = slider.value;
-          let freqData = dataArray[Math.floor(freq / 10)] / 255;
-          totalFrequency += freqData;
-        });
-
-        // Adjust the mesh vertices based on the sum of selected frequencies
-        for (let i = 0; i < geometry.attributes.position.count; i++) {
-          const x = geometry.attributes.position.getX(i);
-          const y = geometry.attributes.position.getY(i);
-          const z = Math.sin(x * 3 + y * 3 + Date.now() * 0.005) * totalFrequency * 0.5;
-          geometry.attributes.position.setZ(i, z);
-        }
-        geometry.attributes.position.needsUpdate = true;
-      }
-
-      mesh.rotation.z += 0.002;
-      renderer.render(scene, camera);
     }
-    animate();
-  </script>
+
+    // Color calculation based on intensity and frequency
+    vec3 color = frequencyToColor(intensity * 1000.0);
+    gl_FragColor = vec4(color, 1.0);
+  }
+</script>
+
+<script>
+  const canvas = document.getElementById('c');
+  const gl = canvas.getContext('webgl');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const vertexShader = createShader(gl, gl.VERTEX_SHADER, document.getElementById("vertex-shader").text);
+  const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, document.getElementById("fragment-shader").text);
+  const program = createProgram(gl, vertexShader, fragmentShader);
+  gl.useProgram(program);
+
+  const positionAttribute = gl.getAttribLocation(program, "a_position");
+  const positionBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([ 
+    -1, -1, 1, -1, -1, 1,
+    -1, 1, 1, -1, 1, 1,
+  ]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(positionAttribute);
+  gl.vertexAttribPointer(positionAttribute, 2, gl.FLOAT, false, 0, 0);
+
+  const u_time = gl.getUniformLocation(program, "u_time");
+  const u_resolution = gl.getUniformLocation(program, "u_resolution");
+  const u_harmonics = gl.getUniformLocation(program, "u_harmonics");
+
+  let frequencies = new Array(10).fill(0);
+  let audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  let analyser = audioContext.createAnalyser();
+  let audioElement = document.createElement("audio");
+  let sourceNode = null;
+
+  function createShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    return shader;
+  }
+
+  function createProgram(gl, vertexShader, fragmentShader) {
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    return program;
+  }
+
+  function render(time) {
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform1f(u_time, time * 0.001);
+    gl.uniform2f(u_resolution, canvas.width, canvas.height);
+
+    const padded = new Float32Array(10);
+    frequencies.forEach((v, i) => padded[i] = v);
+    gl.uniform1fv(u_harmonics, padded);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+
+  document.getElementById("audioFile").addEventListener("change", function(event) {
+    const file = event.target.files[0];
+    const url = URL.createObjectURL(file);
+    audioElement.src = url;
+    audioElement.load();
+
+    sourceNode = audioContext.createMediaElementSource(audioElement);
+    sourceNode.connect(analyser);
+    analyser.connect(audioContext.destination);
+
+    analyser.fftSize = 2048;  // Optimal FFT size
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    function updateFrequenciesFromAudio() {
+      analyser.getByteFrequencyData(dataArray);
+      frequencies = Array.from(dataArray).slice(0, 10).map(f => f / 255 * 20000); // Rescale for mapping
+      requestAnimationFrame(updateFrequenciesFromAudio);
+    }
+
+    updateFrequenciesFromAudio();
+  });
+
+  document.getElementById("playButton").addEventListener("click", function() {
+    if (audioContext.state === "suspended") {
+      audioContext.resume();
+    }
+    if (audioElement.paused) {
+      audioElement.play();
+      this.textContent = "Pause Audio";
+    } else {
+      audioElement.pause();
+      this.textContent = "Play Audio";
+    }
+  });
+</script>
+
 </body>
 </html>
